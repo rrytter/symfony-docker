@@ -5,27 +5,49 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 PROJECT_DIR=`dirname "$SCRIPT_DIR"`
 DOCKER_COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 DOCKER_COMPOSE="docker-compose -f $DOCKER_COMPOSE_FILE"
-DOCKER_PHP="$DOCKER_COMPOSE exec php"
+COLOR_NC='\e[0m'
+COLOR_YELLOW='\e[0;33m'
+COLOR_GREEN='\e[0;32m'
+COLOR_RED='\e[0;31m'
 
 if [ ! -f "$DOCKER_COMPOSE_FILE" ]; then
-    echo "$SCRIPT_NAME: File '$DOCKER_COMPOSE_FILE' not found."
+    echo -e "${COLOR_RED}$SCRIPT_NAME: File '$DOCKER_COMPOSE_FILE' not found.${COLOR_NC}"
     exit 1
 fi
 
 help() {
-    echo "Usage: $SCRIPT_NAME <command> [<args>]"
-    echo "  up          Start docker containers"
-    echo "  down        Stop docker containers"
-    echo "  console     Execute symfony console with arguments"
-    echo "  composer    Execute composer command with arguments"
-    echo "  php         Execute php command with arguments"
-    echo "  test        Execute PHPUnit"
+    echo -e "${COLOR_YELLOW}Usage:${COLOR_NC}"
+    echo -e "  $SCRIPT_NAME <command> [<args>]\n"
+    echo -e "${COLOR_YELLOW}Available commands:${COLOR_NC}"
+    echo -e "  ${COLOR_GREEN}up${COLOR_NC}              Start services"
+    echo -e "  ${COLOR_GREEN}down${COLOR_NC}            Stop services"
+    echo -e "  ${COLOR_GREEN}php${COLOR_NC}             Execute php with arguments"
+    echo -e "  ${COLOR_GREEN}console${COLOR_NC}         Execute symfony console command"
+    echo -e "  ${COLOR_GREEN}composer${COLOR_NC}        Execute composer command"
+    echo -e "  ${COLOR_GREEN}vendor${COLOR_NC}          Execute vendor binary with composer exec"
+    echo -e "  ${COLOR_GREEN}test${COLOR_NC}            Execute phpunit with arguments"
+    echo -e "  ${COLOR_GREEN}mysql${COLOR_NC}           Execute mysql with arguments"
+    echo -e "  ${COLOR_GREEN}mysqldump${COLOR_NC}       Execute mysqldump with arguments"
 }
+
+error() {
+    echo -e "${COLOR_RED}$SCRIPT_NAME: $@${COLOR_NC}"
+}
+
+compose_exec() {
+    if [[ $($DOCKER_COMPOSE ps -q $1) ]]; then
+        run $DOCKER_COMPOSE exec $@
+    else
+        error "Service '$1' is not started."
+        exit 1
+    fi
+}
+
 run() {
-    echo "$SCRIPT_NAME: $@"
+    # Uncomment this line to debug
+    echo -e "${COLOR_GREEN}$SCRIPT_NAME: $@${COLOR_NC}\n"
     $@
 }
-    
 
 case $1 in
     up | start)
@@ -35,23 +57,26 @@ case $1 in
         run $DOCKER_COMPOSE down
     ;;
     php)
-        run $DOCKER_PHP php "${@:2}"
+        compose_exec php php ${@:2}
     ;;
     test)
-        run $DOCKER_PHP php bin/phpunit "${@:2}"
+        compose_exec php php bin/phpunit ${@:2}
     ;;
     console)
-        run $DOCKER_PHP php bin/console "${@:2}"
+        compose_exec php php bin/console ${@:2}
     ;;
     composer)
-        run $DOCKER_PHP composer "${@:2}"
+        compose_exec php composer ${@:2}
+    ;;
+    vendor)
+        compose_exec php composer exec $2 -- ${@:3}
     ;;
     help)
         help
     ;;
     *)
         if [[ -n "$1" ]]; then
-            echo -e "$SCRIPT_NAME: '$1' is not a valid command. See '$SCRIPT_NAME help'.\n"
+            error "'$1' is not a valid command. See '$SCRIPT_NAME help'.\n"
             help
             exit 1
         fi

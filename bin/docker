@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+
+SCRIPT_NAME=`basename "$0"`
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+PROJECT_DIR=`dirname "$SCRIPT_DIR"`
+DOCKER_COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
+DOCKER_COMPOSE="docker-compose -f $DOCKER_COMPOSE_FILE"
+DOCKER_PHP="$DOCKER_COMPOSE exec php"
+
+if [ ! -f "$DOCKER_COMPOSE_FILE" ]; then
+    echo "$SCRIPT_NAME: File '$DOCKER_COMPOSE_FILE' not found."
+    exit 1
+fi
+
+help() {
+    echo "Usage: $SCRIPT_NAME <command> [<args>]"
+    echo "  up          Start docker containers"
+    echo "  down        Stop docker containers"
+    echo "  console     Execute symfony console with arguments"
+    echo "  composer    Execute composer command with arguments"
+    echo "  php         Execute php command with arguments"
+    echo "  test        Execute PHPUnit"
+}
+run() {
+    echo "$SCRIPT_NAME: $@"
+    $@
+}
+    
+
+case $1 in
+    up | start)
+        run $DOCKER_COMPOSE up -d
+    ;;
+    down | stop)
+        run $DOCKER_COMPOSE down
+    ;;
+    php)
+        run $DOCKER_PHP php "${@:2}"
+    ;;
+    test)
+        run $DOCKER_PHP php bin/phpunit "${@:2}"
+    ;;
+    console)
+        run $DOCKER_PHP php bin/console "${@:2}"
+    ;;
+    composer)
+        run $DOCKER_PHP composer "${@:2}"
+    ;;
+    help)
+        help
+    ;;
+    *)
+        if [[ -n "$1" ]]; then
+            echo -e "$SCRIPT_NAME: '$1' is not a valid command. See '$SCRIPT_NAME help'.\n"
+            help
+            exit 1
+        fi
+        help
+    ;;
+esac

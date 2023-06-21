@@ -38,8 +38,7 @@ compose_exec() {
     if [[ $($DOCKER_COMPOSE ps -q $1) ]]; then
         run $DOCKER_COMPOSE exec $@
     else
-        error "Service '$1' is not started."
-        exit 1
+        run $DOCKER_COMPOSE run --rm $@
     fi
 }
 

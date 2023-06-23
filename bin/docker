@@ -6,76 +6,163 @@ PROJECT_DIR=`dirname "$SCRIPT_DIR"`
 DOCKER_COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 DOCKER_COMPOSE="docker-compose -f $DOCKER_COMPOSE_FILE"
 COLOR_NC='\e[0m'
+COLOR_BLUE='\e[0;34m'
 COLOR_YELLOW='\e[0;33m'
-COLOR_GREEN='\e[0;32m'
+COLOR_GREEN='\e[0;32m'  
 COLOR_RED='\e[0;31m'
+VERBOSE=false
+INITIALIZED=false
 
-if [ ! -f "$DOCKER_COMPOSE_FILE" ]; then
-    echo -e "${COLOR_RED}$SCRIPT_NAME: File '$DOCKER_COMPOSE_FILE' not found.${COLOR_NC}"
-    exit 1
-fi
-
-help() {
-    echo -e "${COLOR_YELLOW}Usage:${COLOR_NC}"
-    echo -e "  $SCRIPT_NAME <command> [<args>]\n"
-    echo -e "${COLOR_YELLOW}Available commands:${COLOR_NC}"
-    echo -e "  ${COLOR_GREEN}up${COLOR_NC}              Start services"
-    echo -e "  ${COLOR_GREEN}down${COLOR_NC}            Stop services"
-    echo -e "  ${COLOR_GREEN}php${COLOR_NC}             Execute php with arguments"
-    echo -e "  ${COLOR_GREEN}console${COLOR_NC}         Execute symfony console command"
-    echo -e "  ${COLOR_GREEN}composer${COLOR_NC}        Execute composer command"
-    echo -e "  ${COLOR_GREEN}vendor${COLOR_NC}          Execute vendor binary with composer exec"
-    echo -e "  ${COLOR_GREEN}test${COLOR_NC}            Execute phpunit with arguments"
-    echo -e "  ${COLOR_GREEN}mysql${COLOR_NC}           Execute mysql with arguments"
-    echo -e "  ${COLOR_GREEN}mysqldump${COLOR_NC}       Execute mysqldump with arguments"
+function parse_yaml {
+   local prefix=$2
+   local s='[[:space:]]*' w='[a-zA-Z0-9_-]*' fs=$(echo @|tr @ '\034')
+   sed -ne "s|^\($s\):|\1|" \
+        -e "s|^\($s\)\($w\)$s:$s[\"']\(.*\)[\"']$s\$|\1$fs\2$fs\3|p" \
+        -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p"  $1 |
+   awk -F$fs '{
+      indent = length($1)/2;
+      vname[indent] = $2;
+      for (i in vname) {if (i > indent) {delete vname[i]}}
+      if (length($3) > 0) {
+         vn=""; for (i=0; i<indent; i++) {vn=(vn)(vname[i])("_")}
+         printf("%s%s%s=\"%s\"\n", "'$prefix'",vn, $2, $3);
+      }
+   }'
 }
 
-error() {
-    echo -e "${COLOR_RED}$SCRIPT_NAME: $@${COLOR_NC}"
+help_command() {
+    printf "  ${COLOR_GREEN}%-15s${COLOR_NC} %s\n" "$1" "${@:2}"
+}
+
+help() {
+    echo -e "\nDocker Compose Helper\n"
+    echo -e "${COLOR_YELLOW}Usage:${COLOR_NC}"
+    echo -e "  $SCRIPT_NAME [options] <command> -- [arguments]\n"
+    echo -e "${COLOR_YELLOW}Options:${COLOR_NC}"
+    help_command "-v" "More verbose output"
+    help_command "-h" "This help"
+    echo
+    echo -e "${COLOR_YELLOW}Available commands:${COLOR_NC}"
+    help_command "up" "Start docker services in background"
+    help_command "down" "Stop docker services"
+    help_command "help" "This help"
+    echo -e " ${COLOR_YELLOW}php-fpm.service${COLOR_NC}"
+    help_command "php" "Execute php command"
+    help_command "console" "Execute symfony console command"
+    help_command "composer" "Execute composer command"
+    help_command "vendor" "Execute vendor binary with composer exec command"
+    help_command "test" "Execute vendor binary phpunit command"
+    echo -e " ${COLOR_YELLOW}mariadb.service${COLOR_NC}"
+    help_command "mysql" "Execute mysql command"
+    help_command "mysqldump" "Execute mysqldump command"
+    echo
+}
+
+warn() {
+    [[ $VERBOSE != false ]] && echo -e "${SCRIPT_NAME}: ${COLOR_RED}WARN${COLOR_NC} - $@" >&2
+}
+
+info() {
+    [[ $VERBOSE != false ]] && echo -e "${SCRIPT_NAME}: ${COLOR_BLUE}INFO${COLOR_NC} - $@" >&2
+}
+
+err() {
+    echo $@ >&2
+}
+
+initialize() {
+    if [[ $INITIALIZED == false ]]; then
+        if [[ ! $(docker ps 2> /dev/null) ]]; then
+            err "Couldn't connect to Docker daemon - is it running?"
+            exit 1
+        fi;
+        if [ ! -f "$DOCKER_COMPOSE_FILE" ]; then
+            err "File \"$DOCKER_COMPOSE_FILE\" not found."
+            exit 1
+        fi
+        if [ -f "$PROJECT_DIR/docker-compose.override.yml" ]; then
+            DOCKER_COMPOSE="$DOCKER_COMPOSE -f $PROJECT_DIR/docker-compose.override.yml"
+        fi
+        DOCKER_CONTEXT=$(docker context show)
+        info "Docker context: \"$DOCKER_CONTEXT\""
+        if [ $DOCKER_CONTEXT != "rooless" ]; then
+            warn "You probably should run docker in rootless context"
+        fi
+        if [[ -z $DOCKER_HOST && $DOCKER_CONTEXT == "rootless" ]]; then
+            if [[ -z $XDG_RUNTIME_DIR ]]; then
+                err "Environment variable XDG_RUNTIME_DIR must be set in rootless context."
+                err "See: https://docs.docker.com/engine/security/rootless/#usage"
+                exit 1
+            fi
+            export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/docker.sock"
+            info "Autodetecting DOCKER_HOST=\"$DOCKER_HOST\""
+        fi
+    fi
+    INITIALIZED=true
+}
+
+run() {
+    initialize
+    [[ $VERBOSE != false ]] && echo -e "${SCRIPT_NAME}: ${COLOR_GREEN}EXEC${COLOR_NC} - $@" >&2
+    $@
 }
 
 compose_exec() {
-    if [[ $($DOCKER_COMPOSE ps -q $1) ]]; then
+    initialize
+    if [[ $($DOCKER_COMPOSE ps --status running $1 2> /dev/null) ]]; then
         run $DOCKER_COMPOSE exec $@
     else
+        info "Service \"$1\" is not running, using run instead of exec."
         run $DOCKER_COMPOSE run --rm $@
     fi
 }
 
-run() {
-    # Uncomment this line to debug
-    echo -e "${COLOR_GREEN}$SCRIPT_NAME: $@${COLOR_NC}\n"
-    $@
-}
+while getopts ":vh" OPT; do
+    case $OPT in
+        v)
+            VERBOSE=true
+            ;;
+        h)
+            help
+            exit 0
+            ;;
+        *)
+            err "Invalid option \"-$OPTARG\"."
+            help
+            exit 1
+            ;;
+    esac
+done
+shift $((OPTIND-1))
 
 case $1 in
     up | start)
-        run $DOCKER_COMPOSE up -d
+        run $DOCKER_COMPOSE up --remove-orphans -d
     ;;
     down | stop)
         run $DOCKER_COMPOSE down
     ;;
     php)
-        compose_exec php php ${@:2}
+        compose_exec php-fpm php ${@:2}
     ;;
     test)
-        compose_exec php php bin/phpunit ${@:2}
+        compose_exec php-fpm php bin/phpunit ${@:2}
     ;;
     console)
-        compose_exec php php bin/console ${@:2}
+        compose_exec php-fpm php bin/console ${@:2}
     ;;
     composer)
-        compose_exec php composer ${@:2}
+        compose_exec php-fpm composer ${@:2}
     ;;
     vendor)
-        compose_exec php composer exec $2 -- ${@:3}
+        compose_exec php-fpm composer exec $2 -- ${@:3}
     ;;
     help)
         help
     ;;
     *)
         if [[ -n "$1" ]]; then
-            error "'$1' is not a valid command. See '$SCRIPT_NAME help'.\n"
+            err "Argument \"$1\" is not a valid command. See \"$SCRIPT_NAME help\" to list commands."
             help
             exit 1
         fi

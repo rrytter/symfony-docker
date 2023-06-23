@@ -1,3 +1,4 @@
+version: "3.7"
 services:
   apache:
     build: docker/httpd
@@ -8,16 +9,19 @@ services:
     volumes:
       - "./httpd.conf:/usr/local/apache2/conf/extra/docker.conf"
       - "./:/var/www"
-  php:
-    build: docker/php
-    container_name: php
+  php-fpm:
+    build: docker/php-fpm
+    container_name: php-fpm
     working_dir: /var/www
     volumes:
       - "./php.ini:/usr/local/etc/php/php.ini"
       - "./:/var/www"
   maildev:
-    image: maildev/maildev
+    image: maildev/maildev:latest
     container_name: maildev
     command: "bin/maildev --web 80 --smtp 25 --hide-extensions STARTTLS"
     ports:
       - "8025:80"
+x-docker:
+  services:
+    php-fpm: "foo"
